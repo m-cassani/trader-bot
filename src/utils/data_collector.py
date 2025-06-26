@@ -1,5 +1,4 @@
 import yfinance as yf
-import pandas as pd
 import os
 
 def load_tickers(file_path):
