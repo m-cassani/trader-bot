@@ -3,6 +3,7 @@ import os
 from utils.data_collector import download_stock_data
 from strategies.moving_average_crossover import calculate_moving_averages
 from utils.plot_signals import plot_signals
+from backtest.historical_backtest import historical_backtest
 
 def load_tickers(file_path='data/input/tickers.txt'):
     with open(file_path, 'r') as file:
@@ -35,5 +36,9 @@ if __name__ == "__main__":
         # Plot signals
         save_path = f'data/output/{ticker}_signals.png'
         plot_signals(stock_data, ticker, save_path=save_path)
-
         print(f"Signals for {ticker} saved successfully.\n")
+
+        # Backtest with historical data
+        one_month_ago = stock_data.index[-1] - pd.Timedelta(days=30)
+        recent_data = stock_data.loc[stock_data.index >= one_month_ago]
+        portfolio_values = historical_backtest(recent_data, initial_cash=1000, allocation_pct=0.1)
