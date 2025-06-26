@@ -1,3 +1,10 @@
+# Project-specific ignores
+data/output/
+data/output/*.csv
+data/output/*.txt
+logs/
+*.log
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
