@@ -2,6 +2,7 @@ import pandas as pd
 import os
 from utils.data_collector import download_stock_data
 from strategies.moving_average_crossover import calculate_moving_averages
+from utils.plot_signals import plot_signals
 
 def load_tickers(file_path='data/input/tickers.txt'):
     with open(file_path, 'r') as file:
@@ -30,5 +31,9 @@ if __name__ == "__main__":
 
         # Save signals
         stock_data.to_csv(f'data/output/{ticker}_signals.csv')
+
+        # Plot signals
+        save_path = f'data/output/{ticker}_signals.png'
+        plot_signals(stock_data, ticker, save_path=save_path)
 
         print(f"Signals for {ticker} saved successfully.\n")
