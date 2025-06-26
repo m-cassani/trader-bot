@@ -1,7 +1,12 @@
+from utils.file_manager import save_trade_log, save_summary
+
 def historical_backtest(data, initial_cash=1000, allocation_pct=0.1):
     cash = initial_cash
     position = 0
     portfolio_values = []
+    trade_log = []
+
+    ticker = data['Ticker'].iloc[0] if 'Ticker' in data.columns else 'Unknown'
 
     for idx, row in data.iterrows():
         price = row['Close']
@@ -19,9 +24,25 @@ def historical_backtest(data, initial_cash=1000, allocation_pct=0.1):
             position += shares_to_buy
             print(f"{idx.date()} BUY {shares_to_buy:.4f} shares at {price:.2f}, cash left {cash:.2f}")
 
+            trade_log.append({
+                'timestamp': idx.strftime('%Y-%m-%d %H:%M:%S'),
+                'action': 'BUY',
+                'price': price,
+                'shares': shares_to_buy
+            })
+
         elif signal == -1 and position > 0:
-            cash += position * price
+            proceeds = position * price
+            cash += proceeds
             print(f"{idx.date()} SELL {position:.4f} shares at {price:.2f}, cash {cash:.2f}")
+
+            trade_log.append({
+                'timestamp': idx.strftime('%Y-%m-%d %H:%M:%S'),
+                'action': 'SELL',
+                'price': price,
+                'shares': position
+            })
+
             position = 0
 
         total_value = cash + position * price
@@ -42,5 +63,18 @@ def historical_backtest(data, initial_cash=1000, allocation_pct=0.1):
         print(f"Unrealized position value: R${position * price:.2f} (at final price R${price:.2f})")
     else:
         print("No open positions remaining.")
+
+    # Save trade log
+    save_trade_log(ticker, trade_log)
+
+    # Save summary
+    summary = [{
+        'ticker': ticker,
+        'final_cash': cash,
+        'remaining_shares': position,
+        'total_value': final_value,
+        'profit': profit
+    }]
+    save_summary(summary)
 
     return portfolio_values

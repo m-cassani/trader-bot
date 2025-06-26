@@ -15,6 +15,10 @@ def download_stock_data(ticker, period='1y', interval='1d'):
     """
     data = yf.download(ticker, period=period, interval=interval)
     data.dropna(inplace=True)
+
+    # Add ticker column to the dataset
+    data['Ticker'] = ticker
+
     return data
 
 def save_data(data, ticker):
@@ -23,7 +27,10 @@ def save_data(data, ticker):
     """
     if not os.path.exists('data/output'):
         os.makedirs('data/output')
-    data.to_csv(f'data/output/{ticker}.csv')
+
+    file_path = f'data/output/{ticker}.csv'
+    data.to_csv(file_path)
+    print(f"Data for {ticker} saved successfully to {file_path}.")
 
 if __name__ == "__main__":
     tickers = load_tickers('data/input/tickers.txt')

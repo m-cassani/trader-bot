@@ -1,34 +1,49 @@
 import pandas as pd
 import os
+import argparse
+
 from utils.data_collector import download_stock_data
-from strategies.moving_average_crossover import calculate_moving_averages
 from utils.plot_signals import plot_signals
-from backtest.historical_backtest import historical_backtest
+from utils.file_manager import load_tickers, save_data
 
-def load_tickers(file_path='data/input/tickers.txt'):
-    with open(file_path, 'r') as file:
-        tickers = [line.strip() for line in file if line.strip()]
-    return tickers
+from strategies import moving_average_crossover
 
-def save_data(data, ticker):
-    if not os.path.exists('data/output'):
-        os.makedirs('data/output')
-    data.to_csv(f'data/output/{ticker}.csv')
+# ================= ARGUMENT PARSER =================
 
-if __name__ == "__main__":
+parser = argparse.ArgumentParser(description="Trading Bot Configuration")
+
+parser.add_argument('--mode', choices=['test-historical', 'test-realtime'], required=True, help="Select execution mode.")
+parser.add_argument('--strategy', choices=['moving_average_crossover'], required=True, help="Select trading strategy.")
+parser.add_argument('--window_size', type=int, default=365, help="Rolling window size in days for realtime backtest.")
+parser.add_argument('--initial_cash', type=float, default=5000.0, help="Initial portfolio cash.")
+parser.add_argument('--duration', type=int, default=7, help="Execution duration in days (for realtime mode).")
+
+args = parser.parse_args()
+
+# ================= STRATEGY MAPPING =================
+
+strategies = {
+    'moving_average_crossover': moving_average_crossover.calculate_moving_averages
+}
+
+strategy_function = strategies[args.strategy]
+
+# ================= MAIN FUNCTION =================
+
+def run_historical_backtest():
+    from backtest.historical_backtest import historical_backtest
+
     tickers = load_tickers()
 
     for ticker in tickers:
-        print(f"Processing {ticker}...")
+        print(f"\nProcessing {ticker}...")
 
         # Download fresh data
         stock_data = download_stock_data(ticker)
-
-        # Save raw data
         save_data(stock_data, ticker)
 
-        # Generate signals
-        stock_data = calculate_moving_averages(stock_data)
+        # Apply strategy
+        stock_data = strategy_function(stock_data)
 
         # Save signals
         stock_data.to_csv(f'data/output/{ticker}_signals.csv')
@@ -38,7 +53,30 @@ if __name__ == "__main__":
         plot_signals(stock_data, ticker, save_path=save_path)
         print(f"Signals for {ticker} saved successfully.\n")
 
-        # Backtest with historical data
+        # Run historical backtest for the last 30 days
         one_month_ago = stock_data.index[-1] - pd.Timedelta(days=30)
         recent_data = stock_data.loc[stock_data.index >= one_month_ago]
-        portfolio_values = historical_backtest(recent_data, initial_cash=1000, allocation_pct=0.1)
+
+        portfolio_values = historical_backtest(recent_data, initial_cash=args.initial_cash, allocation_pct=0.1)
+
+
+def run_realtime_backtest():
+    from backtest.realtime_backtest import realtime_backtest
+
+    tickers = load_tickers()
+
+    # Start realtime backtest for all tickers
+    realtime_backtest(tickers, strategy_function, args.initial_cash, args.duration)
+
+
+# ================= ENTRY POINT =================
+
+if __name__ == "__main__":
+    if args.mode == 'test-historical':
+        run_historical_backtest()
+
+    elif args.mode == 'test-realtime':
+        run_realtime_backtest()
+
+    else:
+        print("Invalid mode selected. Please choose 'test-historical' or 'test-realtime'.")
