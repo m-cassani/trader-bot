@@ -1,126 +1,98 @@
 import time
-import pandas as pd
 from datetime import datetime, timedelta
+import pandas as pd
+
 from utils.data_collector import download_stock_data
-from utils.plot_signals import plot_signals
 from utils.file_manager import save_trade_log, save_summary
 
-def realtime_backtest(tickers, strategy_function, initial_cash, duration_days=7, refresh_interval=60, window_size=365):
-    print("\n--- Starting Realtime Backtest ---\n")
 
-    portfolio = {ticker: {'shares': 0, 'cash': initial_cash / len(tickers), 'trade_log': []} for ticker in tickers}
+def realtime_backtest(tickers, strategy_function, initial_cash=5000, allocation_pct=0.1, duration_days=7, window_size=365):
+    
+    cash = initial_cash
+    positions = {ticker: 0 for ticker in tickers}
+    buy_signals = 0
+    sell_signals = 0
+    trade_log = []
+    
     start_time = datetime.now()
     end_time = start_time + timedelta(days=duration_days)
-
-    # Inicializa o histórico com o tamanho da janela
+    
     historical_data = {}
-
     for ticker in tickers:
-        print(f"Loading initial historical data for {ticker}...")
-        data = download_stock_data(ticker, period=f'{window_size}d', interval='1d')
-        if data.empty:
-            print(f"No initial data for {ticker}. Skipping...")
-            continue
-        data['Ticker'] = ticker
-        historical_data[ticker] = data
+        print(f"[{datetime.now()}] Downloading historical data for {ticker}...")
+        historical_data[ticker] = download_stock_data(ticker, period=f'{window_size}d', interval='1d')
 
+    
     while datetime.now() < end_time:
-        print(f"\nRunning realtime check at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
         for ticker in tickers:
-            if ticker not in historical_data:
+            # Download most recent data for ticker
+            print(f"[{datetime.now()}] Downloading most recent data for {ticker}")
+            new_data = download_stock_data(ticker, period='1d', interval='1m')
+            if new_data.empty:
                 continue
 
-            print(f"\nChecking {ticker}...")
+            # Atualizar a janela deslizante
+            historical_data[ticker] = pd.concat([historical_data[ticker], new_data]).drop_duplicates().iloc[-window_size:]
+            
+            # Aplicar a estratégia
+            updated_data = strategy_function(historical_data[ticker])
+            latest_signal = updated_data['Signal'].iloc[-1]
+            latest_price = updated_data['Close'].iloc[-1]
+            if hasattr(latest_price, 'item'):
+                latest_price = latest_price.item()
 
-            # Coleta o dado mais recente
-            recent_data = download_stock_data(ticker, period='7d', interval='1d')
+            if latest_signal == 1 and cash > 0:
+                amount_to_invest = cash * allocation_pct
+                shares_to_buy = int(amount_to_invest // latest_price)
+                if shares_to_buy > 0:
+                    cash -= shares_to_buy * latest_price
+                    positions[ticker] += shares_to_buy
+                    buy_signals += 1
+                    trade_log.append({'timestamp': datetime.now(), 'ticker': ticker, 'action': 'BUY', 'price': latest_price, 'shares': shares_to_buy})
+                    print(f"[{datetime.now()}] BUY {shares_to_buy} shares of {ticker} at {latest_price:.2f}, cash left {cash:.2f}")
 
-            if recent_data.empty:
-                print(f"No new data for {ticker}.")
-                continue
+            elif latest_signal == -1 and positions[ticker] > 0:
+                shares_to_sell = positions[ticker]
+                cash += shares_to_sell * latest_price
+                positions[ticker] = 0
+                sell_signals += 1
+                trade_log.append({'timestamp': datetime.now(), 'ticker': ticker, 'action': 'SELL', 'price': latest_price, 'shares': shares_to_sell})
+                print(f"[{datetime.now()}] SELL {shares_to_sell} shares of {ticker} at {latest_price:.2f}, cash {cash:.2f}")
+            
+            time.sleep(5)  # Pequeno delay entre iterações para evitar bloqueio de API
 
-            # Concatena com o histórico e mantém somente os últimos 'window_size' dias
-            combined_data = pd.concat([historical_data[ticker], recent_data])
-            combined_data = combined_data[~combined_data.index.duplicated(keep='last')]  # Remove duplicados
-            combined_data = combined_data.sort_index()
-            combined_data = combined_data.last(f'{window_size}D')  # Mantém somente a janela
+        time.sleep(60)  # Delay entre ciclos completos de tickers
 
-            historical_data[ticker] = combined_data
-
-            # Aplica a estratégia
-            combined_data = strategy_function(combined_data)
-
-            # Pega o sinal mais recente
-            latest_row = combined_data.iloc[-1]
-            signal = int(latest_row['Signal'])
-            price = latest_row['Close']
-
-            ticker_cash = portfolio[ticker]['cash']
-            ticker_shares = portfolio[ticker]['shares']
-
-            if signal == 1 and ticker_cash > 0:
-                shares_to_buy = (0.1 * ticker_cash) / price
-                portfolio[ticker]['shares'] += shares_to_buy
-                portfolio[ticker]['cash'] -= shares_to_buy * price
-                portfolio[ticker]['trade_log'].append({
-                    'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                    'action': 'BUY',
-                    'price': price,
-                    'shares': shares_to_buy
-                })
-                print(f"BUY {shares_to_buy:.4f} shares of {ticker} at {price:.2f}")
-
-            elif signal == -1 and ticker_shares > 0:
-                proceeds = ticker_shares * price
-                portfolio[ticker]['cash'] += proceeds
-                portfolio[ticker]['trade_log'].append({
-                    'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                    'action': 'SELL',
-                    'price': price,
-                    'shares': ticker_shares
-                })
-                portfolio[ticker]['shares'] = 0
-                print(f"SELL all shares of {ticker} at {price:.2f}, proceeds: {proceeds:.2f}")
-
-            else:
-                print(f"No action for {ticker} at this moment.")
-
-            # Salva log contínuo
-            save_trade_log(ticker, portfolio[ticker]['trade_log'])
-
-            # Gera gráfico atualizado
-            save_path = f'data/output/{ticker}_signals_realtime.png'
-            plot_signals(combined_data, ticker, save_path=save_path)
-
-        print(f"\nWaiting {refresh_interval} seconds for the next check...\n")
-        time.sleep(refresh_interval)
-
-    # Resumo final
-    summary = []
+    # Calculando valor final da carteira
+    final_value = cash
     for ticker in tickers:
-        if ticker not in portfolio:
-            continue
+        if positions[ticker] > 0:
+            latest_price = historical_data[ticker]['Close'].iloc[-1]
+            final_value += positions[ticker] * latest_price
 
-        cash = portfolio[ticker]['cash']
-        shares = portfolio[ticker]['shares']
+    profit = final_value - initial_cash
+    profit_pct = (profit / initial_cash) * 100
 
-        if shares > 0:
-            stock_data = historical_data[ticker]
-            last_price = stock_data.iloc[-1]['Close']
-            total_value = cash + (shares * last_price)
-        else:
-            total_value = cash
+    print("\n--- REALTIME BACKTEST SUMMARY ---")
+    print(f"Initial cash: R${initial_cash:.2f}")
+    print(f"Final portfolio value: R${final_value:.2f}")
+    print(f"Total profit: R${profit:.2f} ({profit_pct:.2f}%)")
+    print(f"Remaining cash: R${cash:.2f}")
+    print(f"Positions: {positions}")
+    print(f"Buy signals: {buy_signals}")
+    print(f"Sell signals: {sell_signals}")
 
-        profit = total_value - (initial_cash / len(tickers))
-
-        summary.append({
-            'ticker': ticker,
-            'final_cash': cash,
-            'remaining_shares': shares,
-            'total_value': total_value,
-            'profit': profit
-        })
-
-    save_summary(summary)
-    print("\n--- Realtime Backtest Completed ---\n")
+    # Salvar arquivos
+    save_trade_log(trade_log)
+    summary = {
+        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'initial_cash': round(initial_cash, 2),
+        'final_cash': round(cash, 2),
+        'total_value': round(final_value, 2),
+        'profit': round(profit, 2),
+        'profit_pct': round(profit_pct, 2),
+        'positions': {t: positions[t] for t in positions if positions[t] > 0},
+        'buy_signals': buy_signals,
+        'sell_signals': sell_signals
+    }
+    save_summary("realtime_backtest", summary)

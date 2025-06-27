@@ -34,6 +34,7 @@ def run_historical_backtest():
     from backtest.historical_backtest import historical_backtest
 
     tickers = load_tickers()
+    all_data = []
 
     for ticker in tickers:
         print(f"\nProcessing {ticker}...")
@@ -42,10 +43,10 @@ def run_historical_backtest():
         stock_data = download_stock_data(ticker)
         save_data(stock_data, ticker)
 
-        # Apply strategy
+        # Apply strategy to generate signals
         stock_data = strategy_function(stock_data)
 
-        # Save signals
+        # Save signals CSV
         stock_data.to_csv(f'data/output/{ticker}_signals.csv')
 
         # Plot signals
@@ -53,11 +54,18 @@ def run_historical_backtest():
         plot_signals(stock_data, ticker, save_path=save_path)
         print(f"Signals for {ticker} saved successfully.\n")
 
-        # Run historical backtest for the last 30 days
+        # Filter recent data (last 30 days)
         one_month_ago = stock_data.index[-1] - pd.Timedelta(days=30)
         recent_data = stock_data.loc[stock_data.index >= one_month_ago]
 
-        portfolio_values = historical_backtest(recent_data, initial_cash=args.initial_cash, allocation_pct=0.1)
+        # Add a 'Ticker' column to identify each dataframe inside the combined list
+        recent_data = recent_data.copy()
+        recent_data['Ticker'] = ticker
+
+        all_data.append(recent_data)
+
+    # Run historical backtest passing the list of dataframes (portfolio)
+    portfolio_values = historical_backtest(all_data, initial_cash=args.initial_cash, allocation_pct=0.1)
 
 
 def run_realtime_backtest():
@@ -66,7 +74,7 @@ def run_realtime_backtest():
     tickers = load_tickers()
 
     # Start realtime backtest for all tickers
-    realtime_backtest(tickers, strategy_function, args.initial_cash, args.duration)
+    realtime_backtest(tickers, strategy_function, args.initial_cash, args.duration, args.window_size)
 
 
 # ================= ENTRY POINT =================
